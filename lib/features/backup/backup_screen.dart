@@ -3,6 +3,8 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:pass_manager/data/local/database_provider.dart';
 import 'package:pass_manager/data/password_repository.dart';
+import 'package:share_plus/share_plus.dart';
+import 'package:file_picker/file_picker.dart';
 
 import 'backup_service.dart';
 
@@ -80,23 +82,28 @@ class _BackupScreenState extends State<BackupScreen> {
   }
 
   Future<void> _handleRestore(File file) async {
-    final password = await _promptPassword(
-      title: 'Decrypt backup',
-      description:
-          'Enter the password that was used when this backup was created to restore your vault.',
-      requireConfirmation: false,
-    );
-    if (password == null) return;
+    final ext = file.path.split('.').last.toLowerCase();
+
+    String? password;
+    if (ext == 'pmvault') {
+      password = await _promptPassword(
+        title: 'Decrypt backup',
+        description: 'Enter the password that was used when this backup was created to restore your vault.',
+        requireConfirmation: false,
+      );
+      if (password == null) return;
+    }
 
     setState(() {
       _isProcessing = true;
     });
     try {
-      final result = await _service.restore(file, password);
+      final result = await _service.restore(file, password ?? '');
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Restored ${result.restoredCount} entries from backup.')),
       );
+      await _loadBackups();
     } on BackupException catch (error) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -248,6 +255,65 @@ class _BackupScreenState extends State<BackupScreen> {
               ),
             ),
           ),
+          const SizedBox(height: 8),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed: _isProcessing ? null : _handleUpload,
+                icon: const Icon(Icons.upload_file_outlined),
+                label: const Text('Upload backup'),
+              ),
+            ),
+          ),
+          const SizedBox(height: 8),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: _isProcessing
+                        ? null
+                        : () async {
+                            setState(() => _isProcessing = true);
+                            try {
+                              final res = await _service.createJsonExport();
+                              if (!mounted) return;
+                              ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Export saved: ${res.file.path.split(Platform.pathSeparator).last}')));
+                              await _loadBackups();
+                            } finally {
+                              if (mounted) setState(() => _isProcessing = false);
+                            }
+                          },
+                    icon: const Icon(Icons.file_copy_outlined),
+                    label: const Text('Export JSON'),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: _isProcessing
+                        ? null
+                        : () async {
+                            setState(() => _isProcessing = true);
+                            try {
+                              final res = await _service.createCsvExport();
+                              if (!mounted) return;
+                              ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Export saved: ${res.file.path.split(Platform.pathSeparator).last}')));
+                              await _loadBackups();
+                            } finally {
+                              if (mounted) setState(() => _isProcessing = false);
+                            }
+                          },
+                    icon: const Icon(Icons.table_chart_outlined),
+                    label: const Text('Export CSV'),
+                  ),
+                ),
+              ],
+            ),
+          ),
           const SizedBox(height: 16),
           Expanded(
             child: _isLoading
@@ -274,6 +340,9 @@ class _BackupScreenState extends State<BackupScreen> {
                               trailing: PopupMenuButton<String>(
                                 onSelected: (value) {
                                   switch (value) {
+                                    case 'share':
+                                      Share.shareXFiles([XFile(file.path)], text: 'Backup file: $title');
+                                      break;
                                     case 'restore':
                                       _handleRestore(file);
                                       break;
@@ -283,6 +352,7 @@ class _BackupScreenState extends State<BackupScreen> {
                                   }
                                 },
                                 itemBuilder: (context) => const [
+                                  PopupMenuItem(value: 'share', child: Text('Share')),
                                   PopupMenuItem(value: 'restore', child: Text('Restore')),
                                   PopupMenuItem(value: 'delete', child: Text('Delete')),
                                 ],
@@ -295,6 +365,51 @@ class _BackupScreenState extends State<BackupScreen> {
         ],
       ),
     );
+  }
+
+  Future<void> _handleUpload() async {
+    setState(() => _isProcessing = true);
+    try {
+      final result = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: ['pmvault', 'json', 'csv'],
+      );
+      if (result == null || result.files.isEmpty) return;
+      final path = result.files.single.path;
+      if (path == null) return;
+      final file = File(path);
+      final ext = file.path.split('.').last.toLowerCase();
+      if (ext == 'pmvault') {
+        final password = await _promptPassword(
+          title: 'Decrypt backup',
+          description: 'Enter the password used to encrypt this backup',
+          requireConfirmation: false,
+        );
+        if (password == null) return;
+        // directly call service.restore with provided password to avoid double prompt
+        setState(() {
+          _isProcessing = true;
+        });
+        try {
+          final result = await _service.restore(file, password);
+          if (!mounted) return;
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Restored ${result.restoredCount} entries from backup.')),
+          );
+          await _loadBackups();
+        } on BackupException catch (error) {
+          if (!mounted) return;
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(error.message)));
+        } finally {
+          if (mounted) setState(() => _isProcessing = false);
+        }
+      } else {
+        // For json/csv we can restore directly (no password)
+        await _handleRestore(file);
+      }
+    } finally {
+      if (mounted) setState(() => _isProcessing = false);
+    }
   }
 
   String _formatTimestamp(DateTime timestamp) {
