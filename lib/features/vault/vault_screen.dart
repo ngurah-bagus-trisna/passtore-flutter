@@ -3,6 +3,7 @@ import 'package:pass_manager/data/local/database_provider.dart';
 import 'package:pass_manager/data/models/password_entry.dart';
 import 'package:pass_manager/data/password_repository.dart';
 import 'package:provider/provider.dart';
+import 'package:pass_manager/data/crypto/crypto_helper.dart';
 
 class VaultScreen extends StatefulWidget {
   const VaultScreen({super.key});
@@ -172,7 +173,7 @@ class _VaultScreenState extends State<VaultScreen> {
                               const Text('Stored securely'),
                             ],
                           ),
-                          onTap: () => _openEditor(entry: entry),
+                          onTap: () => _showEntry(context, entry),
                           trailing: PopupMenuButton<String>(
                             onSelected: (value) {
                               switch (value) {
@@ -214,6 +215,132 @@ class _VaultScreenState extends State<VaultScreen> {
       ),
     );
   }
+}
+
+void _showEntry(BuildContext context, PasswordEntry entry) {
+  showModalBottomSheet<void>(
+    context: context,
+    showDragHandle: true,
+    builder: (_) {
+      return SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              ListTile(
+                title: Text(entry.title),
+                subtitle: Text(entry.username ?? ''),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Stored secret',
+                style: Theme.of(context).textTheme.titleSmall,
+              ),
+              const SizedBox(height: 4),
+              // reveal toggle inside sheet
+              (() {
+                var revealed = false;
+                String? decrypted;
+                return StatefulBuilder(builder: (context, setState) {
+                  String display;
+                  if (revealed) {
+                    display = decrypted ?? entry.secret;
+                  } else {
+                    display = entry.secret.length <= 8 ? entry.secret : '${entry.secret.substring(0, 6)}••';
+                  }
+                  return Row(
+                    children: [
+                      Expanded(
+                        child: SelectableText(
+                          display,
+                          maxLines: 2,
+                        ),
+                      ),
+                      IconButton(
+                        tooltip: revealed ? 'Hide' : 'Show',
+                        icon: Icon(revealed ? Icons.visibility_off : Icons.visibility),
+                        onPressed: () async {
+                          if (!revealed) {
+                            if (entry.encryptedSecret != null) {
+                              final dec = await CryptoHelper.decrypt(entry.encryptedSecret);
+                              decrypted = dec;
+                            }
+                          }
+                          setState(() => revealed = !revealed);
+                        },
+                      ),
+                    ],
+                  );
+                });
+              }()),
+              const SizedBox(height: 12),
+              if ((entry.notes ?? '').isNotEmpty) ...[
+                Text(
+                  'Notes',
+                  style: Theme.of(context).textTheme.titleSmall,
+                ),
+                const SizedBox(height: 4),
+                Text(entry.notes!),
+                const SizedBox(height: 12),
+              ],
+              Text(
+                'Updated ${DateTime.now().difference(entry.updatedAt).inDays >= 1 ? '${entry.updatedAt.year}-${entry.updatedAt.month.toString().padLeft(2, '0')}-${entry.updatedAt.day.toString().padLeft(2, '0')}' : (DateTime.now().difference(entry.updatedAt).inHours >= 1 ? '${DateTime.now().difference(entry.updatedAt).inHours}h ago' : (DateTime.now().difference(entry.updatedAt).inMinutes >= 1 ? '${DateTime.now().difference(entry.updatedAt).inMinutes}m ago' : 'Just now'))}',
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+              const SizedBox(height: 16),
+              FilledButton.icon(
+                onPressed: () {
+                  Navigator.of(context).pop();
+                  Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => _AddEditPasswordScreen(repository: context.read<PasswordRepository>(), entry: entry)));
+                },
+                icon: const Icon(Icons.edit_outlined),
+                label: const Text('Edit'),
+              ),
+              const SizedBox(height: 8),
+              OutlinedButton.icon(
+                onPressed: () {
+                  Navigator.of(context).pop();
+                  // confirm delete handled in caller via repository
+                  showDialog<bool>(
+                    context: context,
+                    builder: (context) {
+                      return AlertDialog(
+                        title: const Text('Delete password'),
+                        content: Text('Delete "${entry.title}"?'),
+                        actions: [
+                          TextButton(
+                            onPressed: () => Navigator.pop(context, false),
+                            child: const Text('Cancel'),
+                          ),
+                          FilledButton(
+                            onPressed: () async {
+                              Navigator.pop(context, true);
+                              final id = entry.id;
+                              if (id != null) {
+                                await context.read<PasswordRepository>().delete(id);
+                                if (context.mounted) {
+                                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Deleted "${entry.title}"')));
+                                }
+                              }
+                            },
+                            child: const Text('Delete'),
+                          ),
+                        ],
+                      );
+                    },
+                  );
+                },
+                icon: const Icon(Icons.delete_outline),
+                label: const Text('Delete'),
+              ),
+            ],
+          ),
+        ),
+      );
+    },
+  );
 }
 
 class _AddEditPasswordScreen extends StatefulWidget {

@@ -7,6 +7,7 @@ import 'package:sqflite/sqflite.dart';
 
 import 'local/database_provider.dart';
 import 'models/password_entry.dart';
+import 'crypto/crypto_helper.dart';
 
 class PasswordRepository extends ChangeNotifier {
   PasswordRepository(this._databaseProvider);
@@ -48,11 +49,13 @@ class PasswordRepository extends ChangeNotifier {
     final normalizedTitle = title.trim();
     final salt = _generateSalt();
     final hash = _hashPassword(password, salt);
+    final encrypted = await CryptoHelper.encrypt(password);
     final entry = PasswordEntry(
       title: normalizedTitle,
       username: _normalize(username),
       secret: hash,
       salt: salt,
+      encryptedSecret: encrypted,
       url: _normalize(url),
       notes: _normalize(notes),
       createdAt: now,
@@ -102,8 +105,10 @@ class PasswordRepository extends ChangeNotifier {
     if (password != null && password.isNotEmpty) {
       final salt = _generateSalt();
       final hash = _hashPassword(password, salt);
+      final encrypted = await CryptoHelper.encrypt(password);
       values['secret'] = hash;
       values['salt'] = salt;
+      values['encrypted_secret'] = encrypted;
       updated = updated.copyWith(secret: hash, salt: salt);
     }
 
@@ -153,6 +158,29 @@ class PasswordRepository extends ChangeNotifier {
       ..addAll(sorted);
     _isInitialized = true;
     notifyListeners();
+  }
+
+  /// Convenience save wrapper used by the UI form. If [input.id] is present
+  /// we call update, otherwise create.
+  Future<void> save(PasswordEntryInput input) async {
+    if (input.id != null) {
+      await update(
+        input.id!,
+        title: input.title,
+        username: input.username,
+        password: input.password,
+        url: input.url,
+        notes: input.notes,
+      );
+    } else {
+      await create(
+        title: input.title,
+        username: input.username,
+        password: input.password ?? '',
+        url: input.url,
+        notes: input.notes,
+      );
+    }
   }
 
   String _generateSalt() {

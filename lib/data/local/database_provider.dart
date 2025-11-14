@@ -23,8 +23,14 @@ class DatabaseProvider {
     final path = p.join(dbPath, 'pass_manager.db');
     return openDatabase(
       path,
-      version: 1,
+      version: 2,
       onCreate: _onCreate,
+      onUpgrade: (db, oldVersion, newVersion) async {
+        if (oldVersion < 2) {
+          // Add encrypted_secret column (nullable) to store encrypted plaintext
+          await db.execute('ALTER TABLE passwords ADD COLUMN encrypted_secret TEXT');
+        }
+      },
     );
   }
 
@@ -44,6 +50,7 @@ class DatabaseProvider {
         username TEXT,
         secret TEXT NOT NULL,
         salt TEXT NOT NULL,
+        encrypted_secret TEXT,
         url TEXT,
         notes TEXT,
         created_at INTEGER NOT NULL,

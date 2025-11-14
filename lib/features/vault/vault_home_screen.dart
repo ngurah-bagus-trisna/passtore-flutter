@@ -6,6 +6,8 @@ import 'package:pass_manager/features/vault/controllers/password_list_notifier.d
 import 'package:pass_manager/features/vault/password_form_arguments.dart';
 import 'package:pass_manager/models/password_entry.dart';
 import 'package:provider/provider.dart';
+import 'package:flutter/services.dart';
+import 'package:pass_manager/data/crypto/crypto_helper.dart';
 
 enum _VaultMenu { backup, restore, lock }
 
@@ -235,15 +237,68 @@ class _VaultViewState extends State<_VaultView> {
               children: [
                 ListTile(
                   title: Text(entry.title),
-                  subtitle: Text(entry.username),
+                  // show username if present
+                  subtitle: (entry.username != null && entry.username!.isNotEmpty) ? Text(entry.username!) : null,
                 ),
                 const SizedBox(height: 8),
-                Text(
-                  'Hashed password',
-                  style: Theme.of(context).textTheme.titleSmall,
-                ),
+                if (entry.username != null && entry.username!.isNotEmpty) ...[
+                  Text('Username', style: Theme.of(context).textTheme.titleSmall),
+                  const SizedBox(height: 4),
+                  SelectableText(entry.username!),
+                  const SizedBox(height: 12),
+                ],
+
+                Text('Password (stored hash)', style: Theme.of(context).textTheme.titleSmall),
                 const SizedBox(height: 4),
-                SelectableText(entry.passwordHash),
+                // Use a StatefulBuilder so the reveal toggle affects only the sheet
+                (() {
+                  var revealed = false;
+                  String? decrypted;
+                  return StatefulBuilder(builder: (context, setState) {
+                    String display;
+                    if (revealed) {
+                      display = decrypted ?? entry.secret;
+                    } else {
+                      display = entry.secret.length <= 8 ? entry.secret : '${entry.secret.substring(0, 6)}••';
+                    }
+                    return Row(
+                      children: [
+                        Expanded(
+                          child: SelectableText(
+                            display,
+                            maxLines: 2,
+                          ),
+                        ),
+                        IconButton(
+                          tooltip: 'Copy',
+                          icon: const Icon(Icons.copy_outlined),
+                          onPressed: () async {
+                            await Clipboard.setData(ClipboardData(text: revealed ? (decrypted ?? entry.secret) : entry.secret));
+                            if (context.mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(content: Text('Copied value to clipboard')),
+                              );
+                            }
+                          },
+                        ),
+                        IconButton(
+                          tooltip: revealed ? 'Hide' : 'Show',
+                          icon: Icon(revealed ? Icons.visibility_off : Icons.visibility),
+                          onPressed: () async {
+                            if (!revealed) {
+                              // attempt to decrypt if encryptedSecret present
+                              if (entry.encryptedSecret != null) {
+                                final dec = await CryptoHelper.decrypt(entry.encryptedSecret);
+                                decrypted = dec;
+                              }
+                            }
+                            setState(() => revealed = !revealed);
+                          },
+                        ),
+                      ],
+                    );
+                  });
+                }()),
                 const SizedBox(height: 12),
                 if ((entry.notes ?? '').isNotEmpty) ...[
                   Text(
@@ -305,7 +360,10 @@ class _VaultViewState extends State<_VaultView> {
       },
     );
     if (confirmed == true && context.mounted) {
-      await context.read<PasswordListNotifier>().deleteEntry(entry.id);
+      final id = entry.id;
+      if (id != null) {
+        await context.read<PasswordListNotifier>().deleteEntry(id);
+      }
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('${entry.title} deleted')),
@@ -345,8 +403,10 @@ class _PasswordTile extends StatelessWidget {
       child: ListTile(
         onTap: onTap,
         title: Text(entry.title),
-        subtitle: Text('${entry.username}\n${entry.hashPreview}'),
-        isThreeLine: true,
+        // Only show the title on the homepage list. Details (username, stored
+        // secret/hash, notes) appear in the detail popup when tapped.
+        subtitle: null,
+        isThreeLine: false,
         trailing: const Icon(Icons.chevron_right),
       ),
     );
