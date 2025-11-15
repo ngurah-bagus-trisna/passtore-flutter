@@ -8,7 +8,7 @@ Kelas : IF701
 NIM   : 230401010136 
 ```
 
-Untuk download/testing aplikasi di android, silahkan merujuk ke (release)[]
+Untuk download/testing aplikasi di android, silahkan merujuk ke [release](https://github.com/ngurah-bagus-trisna/passtore-flutter/releases/tag/v0.1-beta)
 
 ## Getting Started
 
