@@ -1,6 +1,14 @@
 # pass_manager
 
-A new Flutter project.
+Password manager created using flutter + dart.
+
+```
+Nama  : I Gusti Ngurah Bagus Trisna Andika
+Kelas : IF701
+NIM   : 230401010136 
+```
+
+Untuk download/testing aplikasi di android, silahkan merujuk ke (release)[]
 
 ## Getting Started
 
